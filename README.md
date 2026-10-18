@@ -37,6 +37,20 @@ The page is static. Two kinds of data feed it:
 Models smooth out intense local storms. On 17 October 2026, for example, the model put Chennai at
 about 75 mm while gauges recorded up to 300 mm, so the gauges and IMD warnings come first.
 
+### Lake and dam data
+
+Chennai Metro Water and TN WRD block requests from outside India, including GitHub's servers.
+`scripts/push-lakes.sh` runs on a Mac in India at 8 am, 1 pm and 7 pm (launchd job
+`scripts/com.tnrainwatch.lakes.plist`), fetches just those two sources and uploads them as
+`data/lakes.json`. The upload redeploys the site, and the deploy uses that file when its own fetch
+fails. The lake numbers on the live site only update while that Mac is on.
+
+```sh
+cp scripts/com.tnrainwatch.lakes.plist ~/Library/LaunchAgents/
+launchctl load ~/Library/LaunchAgents/com.tnrainwatch.lakes.plist
+tail ~/Library/Logs/tn-rain-watch-lakes.log   # check runs
+```
+
 ## Run locally
 
 ```sh

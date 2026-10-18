@@ -6,9 +6,15 @@ import https from 'node:https';
 import tls from 'node:tls';
 import { readFileSync } from 'node:fs';
 import { readFile, writeFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { DISTRICTS, imdKey } from '../locations.js';
 
-const OUT = new URL('../data/official.json', import.meta.url);
+// Usage: node scripts/update-data.mjs [--only lakes,dams] [--out file.json]
+const arg = (name) => { const i = process.argv.indexOf(`--${name}`); return i > 0 ? process.argv[i + 1] : null; };
+const ONLY = arg('only')?.split(',');
+const OUT = arg('out') ? pathToFileURL(resolve(arg('out'))) : new URL('../data/official.json', import.meta.url);
+const RELAYED = new URL('../data/lakes.json', import.meta.url);
 const BOUNDARIES = new URL('../data/tn-districts.geojson', import.meta.url);
 const UA = 'Mozilla/5.0 (TN Rain Watch; +https://github.com/fleximarketer-pixel/chennai-weather)';
 const IMD_OWS = 'https://reactjs.imd.gov.in/geoserver/ows?service=WFS&version=1.1.0&request=GetFeature&outputFormat=application/json';
@@ -70,7 +76,7 @@ function request(url, { insecure, timeout, redirects = 3 }) {
       res.on('end', () => (res.statusCode === 200 ? resolve(body) : reject(new Error(`HTTP ${res.statusCode} from ${host}`))));
     });
     req.on('timeout', () => req.destroy(new Error(`timeout from ${host}`)));
-    req.on('error', (err) => reject(new Error(`${err.code ?? err.message} from ${host}`)));
+    req.on('error', (err) => reject(err.message.includes(host) ? err : new Error(`${err.code ?? err.message} from ${host}`)));
   });
 }
 
@@ -293,8 +299,13 @@ async function dams() {
 
 // ---------- run ----------
 
+async function readJson(url) {
+  try { return JSON.parse(await readFile(url, 'utf8')); } catch { return null; }
+}
+
 async function readPrevious() {
-  try { return JSON.parse(await readFile(OUT, 'utf8')); } catch { /* no local copy */ }
+  const local = await readJson(OUT);
+  if (local) return local;
   if (process.env.PREVIOUS_URL) {
     try { return await get(process.env.PREVIOUS_URL, { tries: 1 }); } catch { /* first deploy */ }
   }
@@ -302,9 +313,12 @@ async function readPrevious() {
 }
 
 const prev = await readPrevious();
+// The Tamil Nadu government sites block requests from outside India, so a machine in India
+// pushes their data as data/lakes.json (see scripts/push-lakes.sh). Used when a fetch here fails.
+const relayed = ONLY ? {} : (await readJson(RELAYED)) ?? {};
 const out = { generatedAt: new Date().toISOString(), sources: {} };
 
-const jobs = {
+const jobs = Object.fromEntries(Object.entries({
   warnings: () => warnings(),
   nowcast: () => nowcast(),
   gauges: () => gauges(),
@@ -313,7 +327,7 @@ const jobs = {
   alerts: () => alerts(prev.alerts ?? []),
   lakes: () => lakes(),
   dams: () => dams(),
-};
+}).filter(([key]) => !ONLY || ONLY.includes(key)));
 
 const results = await Promise.allSettled(Object.values(jobs).map((fn) => fn()));
 let failures = 0;
@@ -322,12 +336,20 @@ Object.keys(jobs).forEach((key, k) => {
   if (r.status === 'fulfilled') {
     out[key] = r.value;
     out.sources[key] = { ok: true, fetchedAt: out.generatedAt };
-  } else {
-    failures++;
-    out[key] = prev[key] ?? null;
-    out.sources[key] = { ok: false, error: String(r.reason?.message ?? r.reason), fetchedAt: prev.sources?.[key]?.fetchedAt ?? null };
-    console.error(`[${key}] ${out.sources[key].error}`);
+    return;
   }
+  const error = String(r.reason?.message ?? r.reason);
+  const relayedAt = relayed.sources?.[key]?.ok ? relayed.sources[key].fetchedAt : null;
+  if (relayedAt && relayedAt > (prev.sources?.[key]?.fetchedAt ?? '')) {
+    out[key] = relayed[key];
+    out.sources[key] = { ok: true, fetchedAt: relayedAt, relayed: true };
+    console.log(`[${key}] ${error}; using relayed data from ${relayedAt}`);
+    return;
+  }
+  failures++;
+  out[key] = prev[key] ?? null;
+  out.sources[key] = { ok: false, error, fetchedAt: prev.sources?.[key]?.fetchedAt ?? null };
+  console.error(`[${key}] ${error}`);
 });
 
 await writeFile(OUT, JSON.stringify(out));
