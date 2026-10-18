@@ -1,6 +1,9 @@
-import { DISTRICTS, CHENNAI_AREAS } from './locations.js';
+import { DISTRICTS, CHENNAI_AREAS, imdKey } from './locations.js';
 
 const API = 'https://api.open-meteo.com/v1/forecast';
+// OpenStreetMap search; its usage policy allows searches on submit, not on every keystroke.
+const GEOCODER = 'https://nominatim.openstreetmap.org';
+const PLACE_KEY = 'aiw-place';
 const OFFICIAL_URL = 'data/official.json';
 const BOUNDARIES_URL = 'data/tn-districts.geojson';
 const REFRESH_MS = 15 * 60 * 1000;
@@ -40,17 +43,19 @@ const WMO = {
 const SOURCE_LABELS = {
   warnings: 'IMD district warnings', nowcast: 'IMD nowcast', gauges: 'IMD rain gauges',
   rainDaily: 'IMD district rainfall', rainMonth: 'IMD month-to-date', alerts: 'NDMA alerts',
-  lakes: 'Chennai lakes', dams: 'Reservoir telemetry',
+  news: 'News', lakes: 'Chennai lakes', dams: 'Reservoir telemetry',
 };
 
 const state = {
-  view: 'tn',
+  view: 'area',
   data: { tn: [], chennai: [] },
   official: null,
   boundaries: null,
   selected: null,
   season: null,
   fitted: null,
+  place: null,
+  newsLang: 'all',
 };
 
 const levelFor = (mm) => LEVELS.reduce((acc, l, i) => (mm >= l.min ? i : acc), 0);
@@ -192,6 +197,7 @@ const warnLayer = L.geoJSON(null, {
 // Off by default: the table already lists the model forecast, and the map reads better with official data.
 const modelLayer = L.layerGroup();
 const gaugeLayer = L.layerGroup().addTo(map);
+const placeLayer = L.layerGroup().addTo(map);
 L.control.layers(null, {
   'IMD warning today': warnLayer,
   'Forecast next 24h (model)': modelLayer,
@@ -220,11 +226,259 @@ function renderMap(rows) {
       .addTo(gaugeLayer);
   }
 
-  if (state.fitted !== state.view && rows.length) {
-    map.fitBounds(rows.map((r) => [r.lat, r.lon]), { padding: [30, 30], maxZoom: 11 });
-    state.fitted = state.view;
+  placeLayer.clearLayers();
+  const p = state.view === 'area' ? state.place : null;
+  if (p) {
+    L.circleMarker([p.lat, p.lon], { radius: 9, color: '#ffffff', weight: 3, fillColor: '#1f6fd1', fillOpacity: 1 })
+      .bindTooltip(esc(p.name)).addTo(placeLayer);
+  }
+
+  // Re-centre only when the view or place changes, not on every refresh.
+  const fitKey = p ? `area:${p.lat},${p.lon}` : state.view;
+  if (state.fitted !== fitKey) {
+    if (p) map.setView([p.lat, p.lon], 10);
+    else if (rows.length) map.fitBounds(rows.map((r) => [r.lat, r.lon]), { padding: [30, 30], maxZoom: 11 });
+    else map.setView([10.9, 78.6], 7);
+    state.fitted = fitKey;
   }
 }
+
+// ---------- your area ----------
+
+function inRing(x, y, ring) {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [xi, yi] = ring[i], [xj, yj] = ring[j];
+    if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+function districtAt(lat, lon) {
+  for (const f of state.boundaries?.features ?? []) {
+    for (const poly of f.geometry.coordinates) {
+      if (poly.reduce((acc, ring) => (inRing(lon, lat, ring) ? !acc : acc), false)) return f.properties.name;
+    }
+  }
+  return null;
+}
+
+const placeLabel = (a = {}) => [a.suburb, a.village, a.town, a.city, a.county, a.state_district]
+  .filter((v, i, all) => v && all.indexOf(v) === i).slice(0, 2).join(', ');
+
+async function searchPlaces(q) {
+  const params = new URLSearchParams({
+    format: 'jsonv2', q, countrycodes: 'in', viewbox: '76.2,13.6,80.4,8.0', bounded: '1',
+    limit: '8', addressdetails: '1', 'accept-language': 'en',
+  });
+  const res = await fetch(`${GEOCODER}/search?${params}`);
+  if (!res.ok) throw new Error(`search failed (${res.status})`);
+  return (await res.json()).map((x) => ({
+    name: x.name || x.display_name.split(',')[0],
+    sub: placeLabel(x.address),
+    lat: +(+x.lat).toFixed(4),
+    lon: +(+x.lon).toFixed(4),
+  }));
+}
+
+async function reverseName(lat, lon) {
+  try {
+    const params = new URLSearchParams({ format: 'jsonv2', lat, lon, zoom: '14', 'accept-language': 'en' });
+    const res = await fetch(`${GEOCODER}/reverse?${params}`);
+    const x = await res.json();
+    const a = x.address ?? {};
+    return a.suburb || a.village || a.town || a.city || a.county || x.name || 'My location';
+  } catch {
+    return 'My location';
+  }
+}
+
+function savePlace(p) {
+  try { localStorage.setItem(PLACE_KEY, JSON.stringify(p)); } catch { /* storage unavailable */ }
+  history.replaceState(null, '', `#${p.lat},${p.lon},${encodeURIComponent(p.name)}`);
+}
+
+// A shared link (#lat,lon,name) wins over the place remembered on this device.
+function initialPlace() {
+  const [lat, lon, name] = location.hash.slice(1).split(',');
+  if (lat && lon && !Number.isNaN(+lat) && !Number.isNaN(+lon)) return { name: decodeURIComponent(name || 'Shared place'), lat: +lat, lon: +lon };
+  try { return JSON.parse(localStorage.getItem(PLACE_KEY)); } catch { return null; }
+}
+
+async function loadPlace(p) {
+  const [r] = await fetchPlaces([{ name: p.name, lat: p.lat, lon: p.lon }], 2);
+  r.district = districtAt(p.lat, p.lon);
+  r.sub = p.sub ?? null;
+  return r;
+}
+
+async function choosePlace(p) {
+  const results = document.getElementById('results');
+  results.hidden = true;
+  document.getElementById('search').value = '';
+  document.getElementById('brief').innerHTML = `<p class="small">Loading ${esc(p.name)}…</p>`;
+  try {
+    state.place = await loadPlace(p);
+    savePlace(p);
+    render();
+  } catch (err) {
+    document.getElementById('brief').innerHTML = `<p>Could not load ${esc(p.name)}: ${esc(err.message)}</p>`;
+  }
+}
+
+function rainWindows(r) {
+  const h = r.raw.hourly;
+  const windows = [];
+  let cur = null;
+  for (let k = r.i + 1; k <= r.i + 24 && k < h.time.length; k++) {
+    const mm = h.precipitation[k] ?? 0;
+    const p = h.precipitation_probability[k] ?? 0;
+    if (mm >= 0.3 || (mm >= 0.1 && p >= 60)) {
+      cur ??= { from: k, to: k, mm: 0, prob: 0 };
+      cur.to = k;
+      cur.mm += mm;
+      cur.prob = Math.max(cur.prob, p);
+    } else if (cur) {
+      windows.push(cur);
+      cur = null;
+    }
+  }
+  if (cur) windows.push(cur);
+  return windows;
+}
+
+function hourLabel(t, today) {
+  const h = +t.slice(11, 13);
+  const label = h === 0 ? 'midnight' : h === 12 ? 'noon' : `${h % 12} ${h < 12 ? 'am' : 'pm'}`;
+  return t.slice(0, 10) === today ? label : `${label} tomorrow`;
+}
+
+function windowText(r, w) {
+  const h = r.raw.hourly;
+  const today = r.raw.current.time.slice(0, 10);
+  const end = h.time[w.to + 1] ?? h.time[w.to];
+  const amount = w.mm >= 64.5 ? 'very heavy' : w.mm >= 15.6 ? 'heavy' : w.mm >= 5 ? 'moderate' : 'light';
+  return `${hourLabel(h.time[w.from], today)} to ${hourLabel(end, today)}: ${amount} rain, about ${fmt(w.mm)} mm (${w.prob}% chance)`;
+}
+
+const mentions = (text, district) => {
+  const d = DISTRICTS.find((x) => x.name === district);
+  const key = imdKey(text);
+  return [district, ...(d?.imd ?? []), ...(d?.aka ?? [])].some((n) => key.includes(imdKey(n)));
+};
+
+function timeAgo(iso) {
+  const min = Math.round((Date.now() - Date.parse(iso)) / 60000);
+  if (min < 60) return `${Math.max(min, 1)} min ago`;
+  if (min < 24 * 60) return `${Math.round(min / 60)} h ago`;
+  return `${Math.round(min / 1440)} d ago`;
+}
+
+const newsItem = (n) => `<li><a href="${esc(n.link)}" target="_blank" rel="noopener">${esc(n.title)}</a>
+  <span class="small">${esc(n.source)} · ${timeAgo(n.published)}</span></li>`;
+
+const finderHint = `<div class="empty">
+  <h2>Rain and weather for your area</h2>
+  <p>Search for your town, village or neighbourhood anywhere in Tamil Nadu, or use your location.
+  AI Weatherman combines IMD warnings, nearby rain gauges and forecasts into one plain-language update.</p>
+  <p class="small">Try: ${['Velachery', 'Madurai', 'Uthiramerur', 'Kumbakonam', 'Kovilpatti', 'Ooty']
+    .map((n) => `<button type="button" class="link" data-try="${n}">${n}</button>`).join(' · ')}</p></div>`;
+
+function renderBrief() {
+  const el = document.getElementById('brief');
+  const r = state.place;
+  if (!r) { el.innerHTML = finderHint; return; }
+  const o = state.official ?? {};
+  const district = r.district;
+  const { warn, nowcast } = district ? officialFor(district) : {};
+  const today = warn?.[0];
+  const windows = rainWindows(r);
+  const gauge = nearestGauges(r.lat, r.lon, 1)[0];
+  const nearGauge = gauge && gauge.dist <= 15 ? gauge : null;
+  const [text, icon] = wmo(r.raw.current.weather_code);
+
+  // Headline: the most serious thing a resident should know first.
+  let tone = 0, headline;
+  if (today?.level >= 2) {
+    tone = today.level;
+    headline = `IMD ${WARN[today.level].label.toLowerCase()} alert for ${district} district today: ${today.hazards.join(', ').toLowerCase() || 'severe weather'}. ${WARN[today.level].advice}.`;
+  } else if (nowcast?.level >= 1) {
+    tone = Math.max(nowcast.level, 1);
+    headline = `IMD warns of thunderstorms or rain around ${district} in the next few hours (until ${nowcast.to.slice(0, 2)}:${nowcast.to.slice(2)}).`;
+  } else if (r.level >= HEAVY) {
+    tone = 2;
+    headline = `Heavy rain is forecast in the next 24 hours: about ${fmt(r.next24)} mm.`;
+  } else if (windows.length) {
+    tone = 1;
+    const w = windows[0];
+    headline = `Rain ${w.prob >= 60 ? 'likely' : 'possible'} ${windowText(r, w).split(':')[0]}.`;
+  } else {
+    headline = 'No significant rain expected in the next 24 hours.';
+  }
+
+  const points = [];
+  points.push(`<b>Now:</b> ${icon} ${Math.round(r.raw.current.temperature_2m)}°C, ${text.toLowerCase()}${r.rate >= 0.1 ? `, raining about ${fmt(r.rate)} mm an hour` : ''}.`);
+  points.push(windows.length
+    ? `<b>Next 24 hours:</b> ${windows.slice(0, 3).map((w) => windowText(r, w)).join('; ')}.`
+    : '<b>Next 24 hours:</b> mostly dry.');
+  if (today) {
+    const next = warn.slice(1, 3).map((w, k) => `${fmtDay(o.warnings.date, k + 1)}: ${WARN[w.level]?.label.toLowerCase() ?? '—'}${w.hazards.length ? ` (${w.hazards.join(', ').toLowerCase()})` : ''}`);
+    points.push(`<b>IMD for ${esc(district)} district:</b> today ${WARN[today.level]?.label.toLowerCase()}${today.hazards.length ? ` (${today.hazards.join(', ').toLowerCase()})` : ''}; ${next.join('; ')}.`);
+  } else if (!district) {
+    points.push('<b>IMD warnings:</b> this place is outside Tamil Nadu’s district map, so only forecasts are shown.');
+  }
+  if (nearGauge) {
+    points.push(`<b>Measured:</b> the nearest IMD rain gauge, ${esc(title(nearGauge.name))} (${nearGauge.dist.toFixed(1)} km away), recorded <b>${fmt(nearGauge.mm[0])} mm</b> in the 24 hours to 8:30 am ${fmtDay(o.gauges?.endDate)} and ${fmt(nearGauge.mm[6])} mm over 7 days.`);
+  }
+  const daily = r.raw.daily;
+  const coming = [1, 2].map((k) => r.today + k).filter((j) => daily.time[j])
+    .map((j) => `${fmtDay(daily.time[j])} ${fmt(daily.precipitation_sum[j])} mm`);
+  if (coming.length) points.push(`<b>Coming days (model):</b> ${coming.join(', ')}.`);
+
+  const alerts = district ? (o.alerts ?? []).filter((a) => Date.parse(a.expires) > Date.now() && mentions(a.headline, district)) : [];
+  const local = district ? (o.news ?? []).filter((n) => n.districts.includes(district)) : [];
+  const statewide = (o.news ?? []).filter((n) => n.districts.includes('Tamil Nadu') && !local.includes(n));
+  const risky = tone >= 2 || (nearGauge?.mm[0] ?? 0) >= 64.5;
+
+  el.innerHTML = `
+    <h2>📍 ${esc(r.name)} <span class="small">${esc(r.sub || '')}${district ? ` · ${esc(district)} district` : ''}</span></h2>
+    <p class="headline" style="--c:${tone >= 1 ? WARN[Math.min(tone, 3)].color : 'var(--row-hover)'}">${esc(headline)}</p>
+    <ul class="points">${points.map((p) => `<li>${p}</li>`).join('')}</ul>
+    ${alerts.length ? `<h3>Official alerts for this area</h3><ul class="points">${alerts.map((a) => `<li>${esc(a.headline)} <span class="small">valid till ${fmtTime(a.expires)}</span></li>`).join('')}</ul>` : ''}
+    ${risky ? `<h3>Stay safe</h3><ul class="points">
+      <li>Avoid walking or driving through flooded roads and subways; water hides open drains.</li>
+      <li>Keep away from electric poles, fallen wires and waterlogged transformers.</li>
+      <li>Charge your phone, keep a torch and drinking water ready.</li>
+      <li>Emergency: <b>112</b> · State disaster helpline <b>1070</b> · District control room <b>1077</b>${district === 'Chennai' ? ' · Chennai Corporation <b>1913</b>' : ''}</li></ul>` : ''}
+    ${local.length || statewide.length ? `<h3>Latest news${local.length ? ` for ${esc(district)}` : ''}</h3>
+      <ul class="news">${[...local, ...statewide].slice(0, 5).map(newsItem).join('')}</ul>` : ''}
+    <p class="small">Share this place: <a href="${esc(location.href)}">${esc(location.href)}</a></p>`;
+}
+
+// ---------- news ----------
+
+function renderNews() {
+  const el = document.getElementById('news');
+  if (state.view !== 'news') { el.hidden = true; return; }
+  const all = state.official?.news ?? [];
+  const items = all.filter((n) => state.newsLang === 'all' || n.lang === state.newsLang);
+  const chip = (lang, label) => `<button type="button" class="filter" data-lang="${lang}" aria-pressed="${state.newsLang === lang}">${label}</button>`;
+  el.innerHTML = `
+    <div class="news-head"><h2>Live rain news</h2>
+      <div>${chip('all', 'All')} ${chip('en', 'English')} ${chip('ta', 'தமிழ்')}</div></div>
+    <p class="small">Headlines from the last 48 hours via Google News, checked every 30 minutes.</p>
+    ${items.length ? `<ul class="news">${items.map((n) => `<li><a href="${esc(n.link)}" target="_blank" rel="noopener">${esc(n.title)}</a>
+      <span class="small">${esc(n.source)} · ${timeAgo(n.published)}${n.districts.length ? ` · ${esc(n.districts.join(', '))}` : ''}</span></li>`).join('')}</ul>`
+      : '<p>No news loaded yet.</p>'}`;
+  el.hidden = false;
+}
+
+document.getElementById('news').addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-lang]');
+  if (!b) return;
+  state.newsLang = b.dataset.lang;
+  renderNews();
+});
 
 // ---------- alerts + banner ----------
 
@@ -240,7 +494,7 @@ function renderAlerts() {
 
 function renderBanner(rows) {
   const el = document.getElementById('banner');
-  if (state.view === 'lakes') { el.innerHTML = ''; return; }
+  if (!['tn', 'chennai'].includes(state.view)) { el.innerHTML = ''; return; }
   const unit = state.view === 'tn' ? 'districts' : 'areas';
   const pills = [];
 
@@ -395,8 +649,8 @@ function officialDetail(r) {
 
 function renderDetail() {
   const el = document.getElementById('detail');
-  const r = [...state.data.tn, ...state.data.chennai].find((x) => x.name === state.selected);
-  if (!r || state.view === 'lakes') { el.hidden = true; return; }
+  const r = state.view === 'area' ? state.place : [...state.data.tn, ...state.data.chennai].find((x) => x.name === state.selected);
+  if (!r || state.view === 'lakes' || state.view === 'news') { el.hidden = true; return; }
   const { current: c, hourly: h, daily: d } = r.raw;
   const from = Math.max(0, r.i - 24);
   const to = Math.min(h.time.length, r.i + 49);
@@ -421,7 +675,7 @@ function renderDetail() {
       <div class="stat"><b>${fmt(r.next24)} mm</b><span>model next 24h (${r.prob24}%)</span></div>
       <div class="stat"><b>${fmt(r.season)} mm</b><span>model ${state.season.label.toLowerCase()}</span></div>
     </div>
-    ${officialDetail(r)}
+    ${state.view === 'area' ? '' : officialDetail(r)}
     <h3>Hourly rain, past 24h and next 48h (model, mm)</h3>
     ${barChart(h.precipitation.slice(from, to).map((v) => v ?? 0), h.time.slice(from, to), r.i - from)}
     <h3>7-day outlook (model)</h3>
@@ -430,6 +684,13 @@ function renderDetail() {
 }
 
 function select(name) {
+  // Clicking a district on the "Your area" map opens it in the Districts view.
+  if (state.view === 'area' && DISTRICTS.some((d) => d.name === name)) {
+    switchView('tn');
+    state.selected = name;
+    render();
+    return;
+  }
   state.selected = name;
   renderList(currentRows());
   renderDetail();
@@ -510,7 +771,7 @@ function notifyAll() {
   const seen = readNotified();
   const date = new Date().toISOString().slice(0, 10);
   const items = [];
-  for (const r of [...state.data.tn, ...state.data.chennai]) {
+  for (const r of [...state.data.tn, ...state.data.chennai, ...(state.place ? [state.place] : [])]) {
     if (r.level >= HEAVY) items.push({ id: `model|${r.name}|${date}|${r.level}`, title: `${LEVELS[r.level].label} rain forecast: ${r.name}`, body: `${fmt(r.next24)} mm in the next 24h (${r.prob24}% chance, model).` });
   }
   for (const d of DISTRICTS) {
@@ -545,6 +806,7 @@ notifyBtn.addEventListener('click', async () => {
 // ---------- wiring ----------
 
 function currentRows() {
+  if (state.view === 'area' || state.view === 'news' || state.view === 'lakes') return [];
   const rows = [...(state.data[state.view] ?? [])];
   if (state.view === 'tn') return rows.sort((a, b) => warnLevelToday(b.name) - warnLevelToday(a.name) || b.next24 - a.next24);
   return rows.sort((a, b) => b.next24 - a.next24 || b.rate - a.rate);
@@ -552,26 +814,88 @@ function currentRows() {
 
 function render() {
   const rows = currentRows();
-  document.getElementById('grid').hidden = state.view === 'lakes';
+  const { view } = state;
+  const withMap = view === 'area' || view === 'tn' || view === 'chennai';
+  document.getElementById('grid').hidden = !withMap;
+  document.getElementById('finder').hidden = view !== 'area';
+  document.getElementById('brief').hidden = view !== 'area';
+  document.getElementById('table').hidden = view === 'area';
   renderAlerts();
   renderBanner(rows);
-  if (state.view !== 'lakes') {
-    renderList(rows);
+  if (withMap) {
+    if (view === 'area') renderBrief();
+    else renderList(rows);
     renderMap(rows);
     map.invalidateSize();
   }
   renderDetail();
   renderLakes();
+  renderNews();
   renderSources();
 }
 
+function switchView(view) {
+  state.view = view;
+  document.querySelectorAll('.tabs button').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.view === view)));
+  if (view === 'chennai' && !CHENNAI_AREAS.some((a) => a.name === state.selected)) state.selected = 'Nungambakkam';
+  if (view === 'tn' && !DISTRICTS.some((d) => d.name === state.selected)) state.selected = 'Chennai';
+}
+
 document.querySelectorAll('.tabs button').forEach((btn) => btn.addEventListener('click', () => {
-  state.view = btn.dataset.view;
-  document.querySelectorAll('.tabs button').forEach((b) => b.setAttribute('aria-selected', String(b === btn)));
-  if (state.view === 'chennai' && !CHENNAI_AREAS.some((a) => a.name === state.selected)) state.selected = 'Nungambakkam';
-  if (state.view === 'tn' && !DISTRICTS.some((d) => d.name === state.selected)) state.selected = 'Chennai';
+  switchView(btn.dataset.view);
   render();
 }));
+
+// ---------- place search ----------
+
+const results = document.getElementById('results');
+let found = [];
+
+document.getElementById('search-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const q = document.getElementById('search').value.trim();
+  if (!q) return;
+  results.innerHTML = '<li class="small">Searching…</li>';
+  results.hidden = false;
+  try {
+    found = await searchPlaces(q);
+    if (found.length === 1) { choosePlace(found[0]); return; }
+    results.innerHTML = found.length
+      ? found.map((p, k) => `<li><button type="button" data-k="${k}"><b>${esc(p.name)}</b> <span class="small">${esc(p.sub)}</span></button></li>`).join('')
+      : '<li class="small">No places found in Tamil Nadu. Try a nearby town or a different spelling.</li>';
+  } catch (err) {
+    results.innerHTML = `<li class="small">Search failed: ${esc(err.message)}</li>`;
+  }
+});
+
+results.addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-k]');
+  if (b) choosePlace(found[+b.dataset.k]);
+});
+
+document.getElementById('brief').addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-try]');
+  if (!b) return;
+  document.getElementById('search').value = b.dataset.try;
+  document.getElementById('search-form').requestSubmit();
+});
+
+document.getElementById('locate').addEventListener('click', () => {
+  if (!navigator.geolocation) return;
+  const btn = document.getElementById('locate');
+  btn.disabled = true;
+  btn.textContent = 'Locating…';
+  navigator.geolocation.getCurrentPosition(async ({ coords }) => {
+    const lat = +coords.latitude.toFixed(4), lon = +coords.longitude.toFixed(4);
+    await choosePlace({ name: await reverseName(lat, lon), lat, lon });
+    btn.disabled = false;
+    btn.textContent = '📍 Use my location';
+  }, (err) => {
+    btn.disabled = false;
+    btn.textContent = '📍 Use my location';
+    document.getElementById('brief').insertAdjacentHTML('afterbegin', `<p class="small">Could not get your location: ${esc(err.message)}</p>`);
+  }, { timeout: 15000 });
+});
 
 async function load() {
   const updated = document.getElementById('updated');
@@ -587,6 +911,8 @@ async function load() {
     state.data = { tn, chennai };
     state.official = official;
     state.selected ??= 'Chennai';
+    const saved = state.place ?? initialPlace();
+    if (saved) state.place = await loadPlace(saved).catch(() => state.place);
     render();
     notifyAll();
     updated.textContent = `Updated ${new Date().toLocaleTimeString('en-IN', { ...IST, hour: '2-digit', minute: '2-digit' })} IST · auto-refresh every 15 min`;
@@ -594,6 +920,14 @@ async function load() {
     updated.textContent = `Could not load data: ${err.message}. Retrying in 15 min.`;
   }
 }
+
+// Opening a shared link while the page is already open only changes the hash.
+window.addEventListener('hashchange', () => {
+  const p = initialPlace();
+  if (!p || (state.place && p.lat === state.place.lat && p.lon === state.place.lon)) return;
+  switchView('area');
+  choosePlace(p);
+});
 
 document.getElementById('refresh').addEventListener('click', load);
 syncNotifyBtn();

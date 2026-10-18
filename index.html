@@ -20,10 +20,21 @@
   </header>
 
   <nav class="tabs" role="tablist">
-    <button role="tab" data-view="tn" aria-selected="true">Districts</button>
+    <button role="tab" data-view="area" aria-selected="true">Your area</button>
+    <button role="tab" data-view="tn" aria-selected="false">Districts</button>
     <button role="tab" data-view="chennai" aria-selected="false">Chennai areas</button>
     <button role="tab" data-view="lakes" aria-selected="false">Lakes &amp; dams</button>
+    <button role="tab" data-view="news" aria-selected="false">News</button>
   </nav>
+
+  <section id="finder" class="finder">
+    <form id="search-form" role="search">
+      <input id="search" type="search" placeholder="Search your town, village or area" aria-label="Search a place in Tamil Nadu" autocomplete="off">
+      <button type="submit">Search</button>
+      <button type="button" id="locate">📍 Use my location</button>
+    </form>
+    <ul id="results" class="results" hidden></ul>
+  </section>
 
   <section id="alerts" class="alerts" aria-live="polite" hidden></section>
   <section id="banner" class="banner" aria-live="polite"></section>
@@ -31,7 +42,8 @@
   <main id="grid" class="grid">
     <div id="map" class="card map"></div>
     <div class="card list">
-      <table>
+      <div id="brief" class="brief"></div>
+      <table id="table">
         <thead id="head"></thead>
         <tbody id="rows"></tbody>
       </table>
@@ -39,6 +51,7 @@
   </main>
 
   <section id="lakes" class="card lakes" hidden></section>
+  <section id="news" class="card newsfeed" hidden></section>
 
   <section id="detail" class="card detail" hidden></section>
 
@@ -52,7 +65,8 @@
       <a href="https://sachet.ndma.gov.in/" target="_blank" rel="noopener">NDMA Sachet</a>,
       <a href="https://cmwssb.tn.gov.in/lake-level" target="_blank" rel="noopener">Chennai Metro Water</a>,
       <a href="https://wrd.tn.gov.in/" target="_blank" rel="noopener">TN WRD</a>.
-      Commentary: <a href="https://www.facebook.com/tamilnaduweatherman" target="_blank" rel="noopener">Tamil Nadu Weatherman</a>.
+      News via Google News. Commentary: <a href="https://www.facebook.com/tamilnaduweatherman" target="_blank" rel="noopener">Tamil Nadu Weatherman</a>.
+      AI Weatherman is an independent project, not affiliated with IMD or the Tamil Nadu government.
     </p>
   </footer>
 

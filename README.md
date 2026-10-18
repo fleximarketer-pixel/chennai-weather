@@ -6,6 +6,16 @@ Live site: https://fleximarketer-pixel.github.io/chennai-weather/
 
 ## What it shows
 
+**Your area** (default)
+- Search any town, village or neighbourhood in Tamil Nadu, or use your phone's location
+- A plain-language briefing: what's happening now, when rain is expected in the next 24 hours,
+  the IMD warning for your district, what the nearest rain gauge measured, safety tips when it's
+  serious, official alerts and local news
+- The place is remembered on your device and can be shared as a link
+
+**News**
+- Rain and weather headlines from the last 48 hours in English and Tamil (Google News), tagged by district
+
 **Districts**
 - IMD district warnings (green / yellow / orange / red) for today and the next 4 days, on the map and in the table
 - IMD 3-hour nowcast warnings

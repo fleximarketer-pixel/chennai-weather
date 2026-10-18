@@ -297,6 +297,69 @@ async function dams() {
   return out;
 }
 
+// ---------- news (Google News search feeds, English and Tamil) ----------
+
+const NEWS_FEEDS = [
+  {
+    lang: 'en',
+    url: 'https://news.google.com/rss/search?hl=en-IN&gl=IN&ceid=IN:en&q=' + encodeURIComponent(
+      '(rain OR flood OR cyclone OR IMD OR monsoon OR waterlogging OR "heavy rain" OR reservoir) '
+      + '("Tamil Nadu" OR Chennai OR Madurai OR Coimbatore OR Trichy OR Tirunelveli OR Cuddalore OR Thoothukudi OR Delta) when:2d'),
+  },
+  {
+    lang: 'ta',
+    url: 'https://news.google.com/rss/search?hl=ta&gl=IN&ceid=IN:ta&q=' + encodeURIComponent('(மழை OR புயல் OR வெள்ளம் OR வானிலை OR ஏரி) when:2d'),
+  },
+];
+
+const decode = (s) => s.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1')
+  .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'")
+  .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(+n)).replace(/&amp;/g, '&').trim();
+
+// Tamil names lose their final virama when a case suffix is added (அரியலூர் -> அரியலூரில்).
+const NEWS_NAMES = DISTRICTS.map((d) => ({
+  name: d.name,
+  en: [d.name, ...(d.aka ?? [])].map((n) => new RegExp(`\\b${n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i')),
+  ta: (d.ta ?? []).map((n) => n.replace(/்$/, '')),
+}));
+const STATEWIDE = /Tamil Nadu|\bTN\b|தமிழ்நா|தமிழக/i;
+
+function tagDistricts(title) {
+  const hits = NEWS_NAMES.filter((d) => d.en.some((re) => re.test(title)) || d.ta.some((n) => title.includes(n))).map((d) => d.name);
+  if (STATEWIDE.test(title)) hits.push('Tamil Nadu');
+  return hits;
+}
+
+async function news() {
+  const cutoff = Date.now() - 48 * 3600e3;
+  const seen = new Set();
+  const items = [];
+  const feeds = await Promise.allSettled(NEWS_FEEDS.map((f) => get(f.url, { type: 'text' }).then((xml) => ({ ...f, xml }))));
+  for (const feed of feeds) {
+    if (feed.status !== 'fulfilled') continue;
+    const { lang, xml } = feed.value;
+    for (const [, item] of xml.matchAll(/<item>([\s\S]*?)<\/item>/g)) {
+      const source = decode(item.match(/<source[^>]*>([\s\S]*?)<\/source>/)?.[1] ?? '');
+      let headline = decode(item.match(/<title>([\s\S]*?)<\/title>/)?.[1] ?? '');
+      if (source && headline.endsWith(` - ${source}`)) headline = headline.slice(0, -source.length - 3);
+      const published = Date.parse(item.match(/<pubDate>([\s\S]*?)<\/pubDate>/)?.[1] ?? '');
+      const key = headline.toLowerCase().replace(/\W+/g, ' ').trim();
+      if (!headline || !published || published < cutoff || seen.has(key)) continue;
+      seen.add(key);
+      items.push({
+        title: headline,
+        source,
+        link: decode(item.match(/<link>([\s\S]*?)<\/link>/)?.[1] ?? ''),
+        published: new Date(published).toISOString(),
+        lang,
+        districts: tagDistricts(headline),
+      });
+    }
+  }
+  if (!items.length) throw new Error('no news items');
+  return items.sort((a, b) => b.published.localeCompare(a.published)).slice(0, 120);
+}
+
 // ---------- run ----------
 
 async function readJson(url) {
@@ -325,6 +388,7 @@ const jobs = Object.fromEntries(Object.entries({
   rainDaily: () => districtRainfall('D'),
   rainMonth: () => districtRainfall('M'),
   alerts: () => alerts(prev.alerts ?? []),
+  news: () => news(),
   lakes: () => lakes(),
   dams: () => dams(),
 }).filter(([key]) => !ONLY || ONLY.includes(key)));
