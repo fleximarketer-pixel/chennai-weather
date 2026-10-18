@@ -1,6 +1,6 @@
-# Tamil Nadu Rain Watch
+# AI Weatherman
 
-A live weather and rain monitoring dashboard for Chennai and all 38 districts of Tamil Nadu.
+Live rain and weather monitoring for Chennai and all 38 districts of Tamil Nadu.
 
 Live site: https://fleximarketer-pixel.github.io/chennai-weather/
 

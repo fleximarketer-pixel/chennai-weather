@@ -16,7 +16,7 @@ const ONLY = arg('only')?.split(',');
 const OUT = arg('out') ? pathToFileURL(resolve(arg('out'))) : new URL('../data/official.json', import.meta.url);
 const RELAYED = new URL('../data/lakes.json', import.meta.url);
 const BOUNDARIES = new URL('../data/tn-districts.geojson', import.meta.url);
-const UA = 'Mozilla/5.0 (TN Rain Watch; +https://github.com/fleximarketer-pixel/chennai-weather)';
+const UA = 'Mozilla/5.0 (AI Weatherman; +https://github.com/fleximarketer-pixel/chennai-weather)';
 const IMD_OWS = 'https://reactjs.imd.gov.in/geoserver/ows?service=WFS&version=1.1.0&request=GetFeature&outputFormat=application/json';
 const DRMS_OWS = 'https://webgis.imd.gov.in/geoserver/IMD_Data/ows?service=WFS&version=1.0.0&request=GetFeature&outputFormat=application/json';
 const TN_BOX = 'lat BETWEEN 8 AND 13.6 AND long BETWEEN 76.2 AND 80.4';

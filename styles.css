@@ -183,3 +183,4 @@ tbody tr:hover, tbody tr.selected { background: var(--row-hover); }
 
 td.wrap { white-space: normal; min-width: 110px; }
 [hidden] { display: none !important; }
+h1 .tag { display: block; font-size: 13px; font-weight: 500; color: var(--muted); }
