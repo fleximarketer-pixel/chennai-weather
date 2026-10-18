@@ -1,0 +1,46 @@
+name: Update data and deploy
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    # Every 30 minutes. GitHub may delay scheduled runs at busy times.
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Fetch official data
+        # Sources that fail keep their last published values.
+        env:
+          PREVIOUS_URL: https://fleximarketer-pixel.github.io/chennai-weather/data/official.json
+        run: node scripts/update-data.mjs
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: .
+
+      - id: deployment
+        uses: actions/deploy-pages@v4

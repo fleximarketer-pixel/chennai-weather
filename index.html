@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tamil Nadu Rain Watch</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="top">
+    <div>
+      <h1>Tamil Nadu Rain Watch</h1>
+      <p class="sub" id="updated">Loading…</p>
+    </div>
+    <div class="actions">
+      <button id="notify" type="button">Enable alerts</button>
+      <button id="refresh" type="button">Refresh</button>
+    </div>
+  </header>
+
+  <nav class="tabs" role="tablist">
+    <button role="tab" data-view="tn" aria-selected="true">Districts</button>
+    <button role="tab" data-view="chennai" aria-selected="false">Chennai areas</button>
+    <button role="tab" data-view="lakes" aria-selected="false">Lakes &amp; dams</button>
+  </nav>
+
+  <section id="alerts" class="alerts" aria-live="polite" hidden></section>
+  <section id="banner" class="banner" aria-live="polite"></section>
+
+  <main id="grid" class="grid">
+    <div id="map" class="card map"></div>
+    <div class="card list">
+      <table>
+        <thead id="head"></thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+  </main>
+
+  <section id="lakes" class="card lakes" hidden></section>
+
+  <section id="detail" class="card detail" hidden></section>
+
+  <footer class="foot">
+    <div id="sources" class="sources"></div>
+    <p>
+      Forecasts are model data from <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a>,
+      refreshed every 15 minutes. Models smooth out intense local storms, so trust gauge readings and IMD warnings first.
+      Forecast colours follow IMD 24-hour categories (heavy ≥ 64.5 mm, very heavy ≥ 115.6 mm, extremely heavy ≥ 204.5 mm).
+      Official data: <a href="https://mausam.imd.gov.in/" target="_blank" rel="noopener">IMD</a>,
+      <a href="https://sachet.ndma.gov.in/" target="_blank" rel="noopener">NDMA Sachet</a>,
+      <a href="https://cmwssb.tn.gov.in/lake-level" target="_blank" rel="noopener">Chennai Metro Water</a>,
+      <a href="https://wrd.tn.gov.in/" target="_blank" rel="noopener">TN WRD</a>.
+      Commentary: <a href="https://www.facebook.com/tamilnaduweatherman" target="_blank" rel="noopener">Tamil Nadu Weatherman</a>.
+    </p>
+  </footer>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script type="module" src="app.js"></script>
+</body>
+</html>

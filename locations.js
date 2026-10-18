@@ -1,0 +1,63 @@
+// IMD spells district names differently across its products. `imdKey` folds the usual
+// variations (TH/T, doubled letters); `imd` lists spellings that need an explicit alias.
+export const imdKey = (s) => s.toUpperCase().replace(/[^A-Z]/g, '').replace(/TH/g, 'T').replace(/(.)\1+/g, '$1');
+
+// District headquarters for all 38 districts of Tamil Nadu.
+export const DISTRICTS = [
+  { name: 'Ariyalur', lat: 11.14, lon: 79.08 },
+  { name: 'Chengalpattu', lat: 12.69, lon: 79.98 },
+  { name: 'Chennai', lat: 13.08, lon: 80.27 },
+  { name: 'Coimbatore', lat: 11.02, lon: 76.96 },
+  { name: 'Cuddalore', lat: 11.75, lon: 79.75 },
+  { name: 'Dharmapuri', lat: 12.13, lon: 78.16 },
+  { name: 'Dindigul', lat: 10.36, lon: 77.98 },
+  { name: 'Erode', lat: 11.34, lon: 77.72 },
+  { name: 'Kallakurichi', lat: 11.74, lon: 78.96 },
+  { name: 'Kancheepuram', lat: 12.83, lon: 79.70 },
+  { name: 'Kanniyakumari', lat: 8.18, lon: 77.41, imd: ['KANYAKUMARI'] },
+  { name: 'Karur', lat: 10.96, lon: 78.08 },
+  { name: 'Krishnagiri', lat: 12.52, lon: 78.21 },
+  { name: 'Madurai', lat: 9.93, lon: 78.12 },
+  { name: 'Mayiladuthurai', lat: 11.10, lon: 79.65 },
+  { name: 'Nagapattinam', lat: 10.77, lon: 79.84 },
+  { name: 'Namakkal', lat: 11.22, lon: 78.17 },
+  { name: 'Nilgiris', lat: 11.41, lon: 76.70 },
+  { name: 'Perambalur', lat: 11.23, lon: 78.88 },
+  { name: 'Pudukkottai', lat: 10.38, lon: 78.82 },
+  { name: 'Ramanathapuram', lat: 9.37, lon: 78.83 },
+  { name: 'Ranipet', lat: 12.93, lon: 79.33, imd: ['RANIPPETTAI'] },
+  { name: 'Salem', lat: 11.66, lon: 78.15 },
+  { name: 'Sivaganga', lat: 9.85, lon: 78.48, imd: ['SIVAGANGAI'] },
+  { name: 'Tenkasi', lat: 8.96, lon: 77.30 },
+  { name: 'Thanjavur', lat: 10.79, lon: 79.14 },
+  { name: 'Theni', lat: 10.01, lon: 77.48 },
+  { name: 'Thoothukudi', lat: 8.76, lon: 78.13 },
+  { name: 'Tiruchirappalli', lat: 10.79, lon: 78.70 },
+  { name: 'Tirunelveli', lat: 8.71, lon: 77.76 },
+  { name: 'Tirupathur', lat: 12.50, lon: 78.57, imd: ['TIRUPPATTAR'] },
+  { name: 'Tiruppur', lat: 11.11, lon: 77.34 },
+  { name: 'Tiruvallur', lat: 13.14, lon: 79.91 },
+  { name: 'Tiruvannamalai', lat: 12.23, lon: 79.07 },
+  { name: 'Tiruvarur', lat: 10.77, lon: 79.64 },
+  { name: 'Vellore', lat: 12.92, lon: 79.13 },
+  { name: 'Viluppuram', lat: 11.94, lon: 79.49 },
+  { name: 'Virudhunagar', lat: 9.58, lon: 77.96 },
+];
+
+// Chennai neighbourhoods, including the two IMD observatories and flood-prone areas.
+export const CHENNAI_AREAS = [
+  { name: 'Nungambakkam', lat: 13.06, lon: 80.24 },
+  { name: 'Meenambakkam', lat: 12.99, lon: 80.18 },
+  { name: 'Ennore', lat: 13.22, lon: 80.32 },
+  { name: 'Manali', lat: 13.17, lon: 80.26 },
+  { name: 'Red Hills', lat: 13.19, lon: 80.18 },
+  { name: 'Avadi', lat: 13.115, lon: 80.10 },
+  { name: 'Anna Nagar', lat: 13.085, lon: 80.21 },
+  { name: 'T. Nagar', lat: 13.04, lon: 80.234 },
+  { name: 'Porur', lat: 13.035, lon: 80.157 },
+  { name: 'Adyar', lat: 13.006, lon: 80.257 },
+  { name: 'Velachery', lat: 12.98, lon: 80.22 },
+  { name: 'Perungudi', lat: 12.96, lon: 80.24 },
+  { name: 'Sholinganallur', lat: 12.90, lon: 80.227 },
+  { name: 'Tambaram', lat: 12.925, lon: 80.127 },
+];

@@ -1,0 +1,64 @@
+# Tamil Nadu Rain Watch
+
+A live weather and rain monitoring dashboard for Chennai and all 38 districts of Tamil Nadu.
+
+Live site: https://fleximarketer-pixel.github.io/chennai-weather/
+
+## What it shows
+
+**Districts**
+- IMD district warnings (green / yellow / orange / red) for today and the next 4 days, on the map and in the table
+- IMD 3-hour nowcast warnings
+- Measured rain: IMD district average for the last 24h, the wettest gauge in each district, and month-to-date against normal
+- About 340 IMD rain gauges on the map, with 24-hour and 7-day totals
+- Model forecast for the next 24h and an hourly chart and 7-day outlook per place
+
+**Chennai areas**
+- 14 neighbourhoods with the nearest IMD gauge reading and model forecasts
+
+**Lakes & dams**
+- The six Chennai water supply lakes from Chennai Metro Water: storage, level, inflow, outflow, rain at the lake and the same day last year
+- Same-day reservoir telemetry from TN WRD, including Mettur
+
+**Alerts**
+- Official IMD Chennai alerts published through NDMA Sachet
+- Optional browser notifications for new official alerts, IMD orange and red warnings, and model heavy-rain forecasts
+
+## How it works
+
+The page is static. Two kinds of data feed it:
+
+- **Model forecasts** come straight from [Open-Meteo](https://open-meteo.com/) in the browser, every 15 minutes.
+- **Official data** (IMD, NDMA, Chennai Metro Water, TN WRD) cannot be fetched from a browser, so
+  `scripts/update-data.mjs` collects it into `data/official.json`. A GitHub Action runs the script
+  every 30 minutes and redeploys the site to GitHub Pages. If a source fails, its last published
+  value is kept and the page footer marks it.
+
+Models smooth out intense local storms. On 17 October 2026, for example, the model put Chennai at
+about 75 mm while gauges recorded up to 300 mm, so the gauges and IMD warnings come first.
+
+## Run locally
+
+```sh
+npm run update   # fetch official data into data/official.json
+npm start        # serve on http://localhost:8080
+```
+
+Browser notifications need `localhost` or HTTPS.
+
+## Files
+
+- `index.html`, `styles.css`, `app.js`: the page
+- `locations.js`: district headquarters, Chennai neighbourhoods and IMD name spellings
+- `scripts/update-data.mjs`: collects official data
+- `scripts/build-boundaries.mjs`: one-off, builds `data/tn-districts.geojson` from IMD's district map
+- `scripts/certs/`: the intermediate certificate IMD's gauge server leaves out of its TLS chain
+- `.github/workflows/deploy.yml`: scheduled update and deploy
+
+## Data source notes
+
+- IMD gauge totals cover the 24 hours to 8:30 am IST and are published around 2 pm IST.
+- Chennai Metro Water's lake report usually lags by a day or two; the TN WRD telemetry is same-day.
+- TN WRD's certificate has expired, so the script skips certificate checks for that host only.
+- GitHub turns off scheduled workflows in public repos after 60 days without commits. Re-enable it
+  from the Actions tab if the data stops updating.

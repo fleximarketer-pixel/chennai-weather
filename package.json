@@ -1,0 +1,10 @@
+{
+  "name": "tn-rain-watch",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "update": "node scripts/update-data.mjs",
+    "boundaries": "node scripts/build-boundaries.mjs",
+    "start": "python3 -m http.server 8080"
+  }
+}
