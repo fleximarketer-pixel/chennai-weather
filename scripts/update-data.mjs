@@ -404,7 +404,7 @@ Object.keys(jobs).forEach((key, k) => {
   }
   const error = String(r.reason?.message ?? r.reason);
   const relayedAt = relayed.sources?.[key]?.ok ? relayed.sources[key].fetchedAt : null;
-  if (relayedAt && relayedAt > (prev.sources?.[key]?.fetchedAt ?? '')) {
+  if (relayedAt && relayedAt >= (prev.sources?.[key]?.fetchedAt ?? '')) {
     out[key] = relayed[key];
     out.sources[key] = { ok: true, fetchedAt: relayedAt, relayed: true };
     console.log(`[${key}] ${error}; using relayed data from ${relayedAt}`);
