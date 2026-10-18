@@ -34,6 +34,8 @@ jobs:
         # Sources that fail keep their last published values.
         env:
           PREVIOUS_URL: https://fleximarketer-pixel.github.io/chennai-weather/data/official.json
+          # AI Weatherman briefings; skipped (previous ones kept) when the secret is missing.
+          MINIMAX_API_KEY: ${{ secrets.MINIMAX_API_KEY }}
         run: node scripts/update-data.mjs
 
       - uses: actions/configure-pages@v5

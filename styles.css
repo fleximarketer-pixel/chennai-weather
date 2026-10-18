@@ -247,3 +247,8 @@ button.link { border: 0; padding: 0; background: none; color: var(--accent); tex
   .list:has(#brief:not([hidden])) { order: -1; }
   .grid:has(#brief:not([hidden])) .map { min-height: 280px; }
 }
+
+.ai { margin: 12px 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--row-hover); }
+.ai-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.ai p { margin: 6px 0 0; line-height: 1.5; }
+.ai p.small { margin-top: 4px; }

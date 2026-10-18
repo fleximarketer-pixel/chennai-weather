@@ -4,6 +4,7 @@ const API = 'https://api.open-meteo.com/v1/forecast';
 // OpenStreetMap search; its usage policy allows searches on submit, not on every keystroke.
 const GEOCODER = 'https://nominatim.openstreetmap.org';
 const PLACE_KEY = 'aiw-place';
+const LANG_KEY = 'aiw-lang';
 const OFFICIAL_URL = 'data/official.json';
 const BOUNDARIES_URL = 'data/tn-districts.geojson';
 const REFRESH_MS = 15 * 60 * 1000;
@@ -43,7 +44,7 @@ const WMO = {
 const SOURCE_LABELS = {
   warnings: 'IMD district warnings', nowcast: 'IMD nowcast', gauges: 'IMD rain gauges',
   rainDaily: 'IMD district rainfall', rainMonth: 'IMD month-to-date', alerts: 'NDMA alerts',
-  news: 'News', lakes: 'Chennai lakes', dams: 'Reservoir telemetry',
+  news: 'News', lakes: 'Chennai lakes', dams: 'Reservoir telemetry', ai: 'AI briefings',
 };
 
 const state = {
@@ -56,6 +57,7 @@ const state = {
   fitted: null,
   place: null,
   newsLang: 'all',
+  aiLang: (() => { try { return localStorage.getItem(LANG_KEY) === 'ta' ? 'ta' : 'en'; } catch { return 'en'; } })(),
 };
 
 const levelFor = (mm) => LEVELS.reduce((acc, l, i) => (mm >= l.min ? i : acc), 0);
@@ -377,6 +379,27 @@ function timeAgo(iso) {
 const newsItem = (n) => `<li><a href="${esc(n.link)}" target="_blank" rel="noopener">${esc(n.title)}</a>
   <span class="small">${esc(n.source)} · ${timeAgo(n.published)}</span></li>`;
 
+// The AI Weatherman paragraph for a district (or 'state' for all of Tamil Nadu), in English or Tamil.
+function aiBox(district) {
+  const ai = state.official?.ai;
+  const b = district === 'state' ? ai?.state : ai?.districts?.[district];
+  if (!b) return '';
+  const lang = state.aiLang === 'ta' && b.ta ? 'ta' : 'en';
+  return `<div class="ai">
+    <div class="ai-head"><b>🤖 AI Weatherman${district === 'state' ? ': Tamil Nadu today' : ''}</b>
+      ${b.ta ? `<button type="button" class="filter" data-ai-lang="${lang === 'en' ? 'ta' : 'en'}">${lang === 'en' ? 'தமிழில்' : 'English'}</button>` : ''}</div>
+    <p lang="${lang}">${esc(b[lang])}</p>
+    <p class="small">Written by AI from the official data, ${timeAgo(ai.generatedAt)}. It can make mistakes: follow IMD and district administration warnings.</p></div>`;
+}
+
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-ai-lang]');
+  if (!b) return;
+  state.aiLang = b.dataset.aiLang;
+  try { localStorage.setItem(LANG_KEY, state.aiLang); } catch { /* storage unavailable */ }
+  render();
+});
+
 const finderHint = `<div class="empty">
   <h2>Rain and weather for your area</h2>
   <p>Search for your town, village or neighbourhood anywhere in Tamil Nadu, or use your location.
@@ -387,7 +410,7 @@ const finderHint = `<div class="empty">
 function renderBrief() {
   const el = document.getElementById('brief');
   const r = state.place;
-  if (!r) { el.innerHTML = finderHint; return; }
+  if (!r) { el.innerHTML = finderHint + aiBox('state'); return; }
   const o = state.official ?? {};
   const district = r.district;
   const { warn, nowcast } = district ? officialFor(district) : {};
@@ -443,6 +466,7 @@ function renderBrief() {
   el.innerHTML = `
     <h2>📍 ${esc(r.name)} <span class="small">${esc(r.sub || '')}${district ? ` · ${esc(district)} district` : ''}</span></h2>
     <p class="headline" style="--c:${tone >= 1 ? WARN[Math.min(tone, 3)].color : 'var(--row-hover)'}">${esc(headline)}</p>
+    ${district ? aiBox(district) : ''}
     <ul class="points">${points.map((p) => `<li>${p}</li>`).join('')}</ul>
     ${alerts.length ? `<h3>Official alerts for this area</h3><ul class="points">${alerts.map((a) => `<li>${esc(a.headline)} <span class="small">valid till ${fmtTime(a.expires)}</span></li>`).join('')}</ul>` : ''}
     ${risky ? `<h3>Stay safe</h3><ul class="points">
@@ -467,6 +491,7 @@ function renderNews() {
     <div class="news-head"><h2>Live rain news</h2>
       <div>${chip('all', 'All')} ${chip('en', 'English')} ${chip('ta', 'தமிழ்')}</div></div>
     <p class="small">Headlines from the last 48 hours via Google News, checked every 30 minutes.</p>
+    ${aiBox('state')}
     ${items.length ? `<ul class="news">${items.map((n) => `<li><a href="${esc(n.link)}" target="_blank" rel="noopener">${esc(n.title)}</a>
       <span class="small">${esc(n.source)} · ${timeAgo(n.published)}${n.districts.length ? ` · ${esc(n.districts.join(', '))}` : ''}</span></li>`).join('')}</ul>`
       : '<p>No news loaded yet.</p>'}`;
@@ -675,6 +700,7 @@ function renderDetail() {
       <div class="stat"><b>${fmt(r.next24)} mm</b><span>model next 24h (${r.prob24}%)</span></div>
       <div class="stat"><b>${fmt(r.season)} mm</b><span>model ${state.season.label.toLowerCase()}</span></div>
     </div>
+    ${state.view === 'area' ? '' : aiBox(state.view === 'chennai' ? 'Chennai' : r.name)}
     ${state.view === 'area' ? '' : officialDetail(r)}
     <h3>Hourly rain, past 24h and next 48h (model, mm)</h3>
     ${barChart(h.precipitation.slice(from, to).map((v) => v ?? 0), h.time.slice(from, to), r.i - from)}

@@ -2,6 +2,7 @@
 // None of these sources allow browser requests, so this runs on a schedule and the page
 // reads the JSON it writes. Each source is independent: if one fails, its last good value
 // is kept and marked stale.
+import { createHash } from 'node:crypto';
 import https from 'node:https';
 import tls from 'node:tls';
 import { readFileSync } from 'node:fs';
@@ -415,6 +416,135 @@ Object.keys(jobs).forEach((key, k) => {
   out.sources[key] = { ok: false, error, fetchedAt: prev.sources?.[key]?.fetchedAt ?? null };
   console.error(`[${key}] ${error}`);
 });
+
+// ---------- AI Weatherman briefings (MiniMax) ----------
+
+// Writes a short English and Tamil briefing per district, and one for the whole state, from the
+// data above. Needs MINIMAX_API_KEY; without it the previous briefings are kept.
+const AI_MODEL = process.env.MINIMAX_MODEL || 'MiniMax-M3';
+const WARN_NAMES = ['green (no warning)', 'yellow (be aware)', 'orange (be prepared)', 'red (take action)'];
+// IMD 24h rainfall categories, used to round forecasts so small model changes don't trigger a rewrite.
+const rainClass = (mm) => ['little or no', 'light', 'moderate', 'heavy', 'very heavy', 'extremely heavy']
+  [[2.5, 15.6, 64.5, 115.6, 204.5].filter((t) => mm >= t).length];
+const AI_SYSTEM = `You are AI Weatherman, writing rain briefings for ordinary residents of Tamil Nadu.
+Use only the facts you are given. Never invent numbers, places, times or warnings.
+IMD warnings and rain gauges are official; model forecasts are guidance and often underestimate
+intense storms, so when they disagree, go with IMD. News headlines are unverified: mention them only
+as "news reports say", and only when they add something local such as flooding or school closures.
+Write like a calm, practical local weather blogger: plain words, no hype, no hashtags, no emoji.
+Each briefing is 2-3 sentences and at most 60 words. Say what matters first: an IMD orange or red
+warning, heavy rain already measured, then what to expect and roughly when. Give one practical tip
+only when it is serious. If nothing notable is happening, say so in one sentence.
+For "ta", write the same briefing in natural, everyday written Tamil (not a word-for-word translation).
+Reply with only a JSON object, no markdown.`;
+
+async function minimax(prompt) {
+  const res = await fetch('https://api.minimax.io/v1/text/chatcompletion_v2', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${process.env.MINIMAX_API_KEY}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: AI_MODEL,
+      max_tokens: 12000,
+      temperature: 0.4,
+      messages: [{ role: 'system', content: AI_SYSTEM }, { role: 'user', content: prompt }],
+    }),
+    signal: AbortSignal.timeout(240000),
+  });
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok || (j.base_resp && j.base_resp.status_code !== 0)) {
+    throw new Error(`MiniMax ${res.status}: ${j.base_resp?.status_msg ?? j.error?.message ?? 'request failed'}`);
+  }
+  // The model may reason in <think> tags before answering.
+  const text = String(j.choices?.[0]?.message?.content ?? '').replace(/<think>[\s\S]*?<\/think>/g, '');
+  const json = text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1);
+  return JSON.parse(json);
+}
+
+const clean = (s, max) => typeof s === 'string' && s.trim() ? s.replace(/\s+/g, ' ').trim().slice(0, max) : null;
+
+async function modelForecast() {
+  const q = new URLSearchParams({
+    latitude: DISTRICTS.map((d) => d.lat).join(','),
+    longitude: DISTRICTS.map((d) => d.lon).join(','),
+    daily: 'precipitation_sum,precipitation_probability_max',
+    forecast_days: '3',
+    timezone: 'Asia/Kolkata',
+  });
+  const list = await get(`https://api.open-meteo.com/v1/forecast?${q}`);
+  return Object.fromEntries(DISTRICTS.map((d, k) => [d.name, list[k].daily]));
+}
+
+function districtFacts(data, forecast) {
+  const day = (n) => data.warnings?.date ? new Date(Date.parse(data.warnings.date) + n * 864e5).toDateString().slice(0, 10) : `day ${n + 1}`;
+  return DISTRICTS.map(({ name }) => {
+    const f = { district: name };
+    const warn = data.warnings?.districts?.[name];
+    if (warn) f.imdWarnings = warn.slice(0, 3).map((w, k) => `${k === 0 ? 'today' : day(k)}: ${WARN_NAMES[w.level] ?? 'unknown'}${w.hazards.length ? `, ${w.hazards.join(', ')}` : ''}`);
+    const now = data.nowcast?.districts?.[name];
+    if (now?.level >= 1) f.imdNowcast = `${WARN_NAMES[now.level]} until ${now.to.slice(0, 2)}:${now.to.slice(2)} IST`;
+    const daily = data.rainDaily?.districts?.[name];
+    if (daily?.actual != null) f.districtAverageRain24h = `${daily.actual} mm (to 8:30 am ${data.rainDaily.date})`;
+    const month = data.rainMonth?.districts?.[name];
+    if (month?.actual != null) f.monthToDate = `${month.actual} mm against normal ${month.normal} mm`;
+    const wet = (data.gauges?.stations ?? []).filter((s) => s.district === name && s.mm[0] > 0).sort((a, b) => b.mm[0] - a.mm[0]).slice(0, 2);
+    if (wet.length) f.wettestGauges24h = `${wet.map((s) => `${s.name} ${s.mm[0]} mm`).join(', ')} (to 8:30 am ${data.gauges.endDate})`;
+    const fc = forecast?.[name];
+    if (fc) f.modelForecast = fc.time.map((t, k) => `${k === 0 ? 'today' : t}: ${rainClass(fc.precipitation_sum[k] ?? 0)} rain, ${fc.precipitation_probability_max[k] ?? 0}% chance`);
+    const alerts = (data.alerts ?? []).filter((a) => Date.parse(a.expires) > Date.now() && a.headline.toLowerCase().includes(name.toLowerCase()));
+    if (alerts.length) f.officialAlerts = alerts.slice(0, 2).map((a) => a.headline);
+    const news = (data.news ?? []).filter((n) => n.districts.includes(name) && n.lang === 'en').slice(0, 3);
+    if (news.length) f.newsHeadlines = news.map((n) => n.title);
+    return f;
+  });
+}
+
+async function briefings(data, previous) {
+  if (!process.env.MINIMAX_API_KEY) throw new Error('MINIMAX_API_KEY is not set');
+  const forecast = await modelForecast().catch(() => null);
+  const facts = districtFacts(data, forecast);
+  // Rewrite only when the facts change (news aside), or every 3 hours to stay current.
+  const inputHash = createHash('sha256').update(JSON.stringify(facts.map(({ newsHeadlines, ...f }) => f))).digest('hex').slice(0, 16);
+  if (previous?.inputHash === inputHash && Date.now() - Date.parse(previous.generatedAt) < 3 * 3600e3) return previous;
+
+  const now = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' });
+  const batches = [];
+  for (let i = 0; i < facts.length; i += 10) batches.push(facts.slice(i, i + 10));
+  const statewide = facts.map(({ newsHeadlines, ...f }) => f);
+  const [state, ...parts] = await Promise.all([
+    minimax(`It is ${now} IST. Write one briefing for the whole of Tamil Nadu, at most 90 words: name the districts
+that matter most and what they should expect. Facts per district:\n${JSON.stringify(statewide)}\n
+Reply as {"en": "...", "ta": "..."}.`),
+    ...batches.map((b) => minimax(`It is ${now} IST. Write a briefing for each district below. Facts:\n${JSON.stringify(b)}\n
+Reply as {"<district name exactly as given>": {"en": "...", "ta": "..."}, ...} with every district.`)),
+  ]);
+  const districts = {};
+  for (const part of parts) {
+    for (const { district } of facts) {
+      const b = part[district];
+      if (b && clean(b.en, 600)) districts[district] = { en: clean(b.en, 600), ta: clean(b.ta, 1200) };
+    }
+  }
+  if (Object.keys(districts).length < 30) throw new Error(`MiniMax returned briefings for only ${Object.keys(districts).length} districts`);
+  return {
+    generatedAt: new Date().toISOString(),
+    model: AI_MODEL,
+    inputHash,
+    state: clean(state.en, 900) ? { en: clean(state.en, 900), ta: clean(state.ta, 1800) } : null,
+    districts,
+  };
+}
+
+if (!ONLY) {
+  try {
+    const ai = await briefings(out, prev.ai);
+    out.ai = ai;
+    out.sources.ai = { ok: true, fetchedAt: ai.generatedAt };
+  } catch (e) {
+    out.ai = prev.ai ?? null;
+    out.sources.ai = { ok: false, error: String(e.message ?? e), fetchedAt: prev.ai?.generatedAt ?? null };
+    console.error(`[ai] ${e.message ?? e}`);
+  }
+}
 
 await writeFile(OUT, JSON.stringify(out));
 console.log(`Wrote ${OUT.pathname}: ${Object.keys(jobs).length - failures}/${Object.keys(jobs).length} sources fresh`);

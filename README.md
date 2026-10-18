@@ -13,6 +13,11 @@ Live site: https://fleximarketer-pixel.github.io/chennai-weather/
   serious, official alerts and local news
 - The place is remembered on your device and can be shared as a link
 
+**AI Weatherman briefings**
+- A short briefing per district and one for the whole state, in English and Tamil, written by
+  MiniMax from the official data and forecasts. Shown in Your area, Districts, Chennai areas and News.
+- Rewritten when the warnings, measured rain or forecast change, and at least every 3 hours
+
 **News**
 - Rain and weather headlines from the last 48 hours in English and Tamil (Google News), tagged by district
 
@@ -46,6 +51,19 @@ The page is static. Two kinds of data feed it:
 
 Models smooth out intense local storms. On 17 October 2026, for example, the model put Chennai at
 about 75 mm while gauges recorded up to 300 mm, so the gauges and IMD warnings come first.
+
+### AI briefings
+
+After collecting the data, the script sends a compact set of facts per district (IMD warnings and
+nowcast, measured rain, month against normal, forecast category, alerts, headlines) to MiniMax
+(`MiniMax-M3`, or `MINIMAX_MODEL`) and stores the replies in `official.json` under `ai`. It needs
+the `MINIMAX_API_KEY` repository secret:
+
+```sh
+gh secret set MINIMAX_API_KEY -R fleximarketer-pixel/chennai-weather
+```
+
+Without the key, or if MiniMax fails, the last briefings are kept and the footer marks them stale.
 
 ### Lake and dam data
 
